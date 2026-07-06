@@ -141,39 +141,38 @@ if uploaded_file:
 
     # TAB 5 - CHARTS (data-driven based on profile)
     with tab5:
-        st.subheader("Charts")
-        numeric_cols = profile["numeric_cols"]
-        categorical_cols = profile["categorical_cols"]
+        st.subheader("AI-Recommended Charts")
 
-        if numeric_cols:
-            st.markdown("#### Distribution")
-            selected_col = st.selectbox("Select column", numeric_cols)
-            fig = px.histogram(df, x=selected_col, title=f"Distribution of {selected_col}")
-            st.plotly_chart(fig, use_container_width=True)
+        if st.button("📊 Generate Smart Charts"):
+            with st.spinner("AI deciding what to visualize..."):
+                from agents.visualization_agent import run_visualization_agent
+                st.session_state.chart_specs = run_visualization_agent(
+                    profile,
+                    profile_analysis=st.session_state.profile_analysis or ""
+                )
 
-            if len(numeric_cols) >= 2:
-                st.markdown("#### Correlation Heatmap")
-                corr = df[numeric_cols].corr()
-                fig2 = px.imshow(corr, text_auto=True, title="Correlation Matrix")
-                st.plotly_chart(fig2, use_container_width=True)
+        if "chart_specs" in st.session_state and st.session_state.chart_specs:
+            from core.charts import render_chart
+            specs = st.session_state.chart_specs
 
-        if categorical_cols and numeric_cols:
-            st.markdown("#### Category vs Numeric")
-            cat_col = st.selectbox("Select category column", categorical_cols)
-            num_col = st.selectbox("Select numeric column", numeric_cols, key="num")
-            fig3 = px.bar(
-                df.groupby(cat_col)[num_col].mean().reset_index(),
-                x=cat_col, y=num_col,
-                title=f"Average {num_col} by {cat_col}"
-            )
-            st.plotly_chart(fig3, use_container_width=True)
-
-        if profile["datetime_cols"]:
-            st.markdown("#### Time Series")
-            date_col = st.selectbox("Select date column", profile["datetime_cols"])
-            num_col_ts = st.selectbox("Select numeric column", numeric_cols, key="ts")
-            fig4 = px.line(df, x=date_col, y=num_col_ts, title=f"{num_col_ts} over time")
-            st.plotly_chart(fig4, use_container_width=True)
+            # Render in 2 column grid
+            for i in range(0, len(specs), 2):
+                col1, col2 = st.columns(2)
+                with col1:
+                    spec = specs[i]
+                    st.caption(f"💡 {spec.get('reason', '')}")
+                    fig = render_chart(df, spec)
+                    if fig:
+                        st.plotly_chart(fig, use_container_width=True)
+                if i + 1 < len(specs):
+                    with col2:
+                        spec = specs[i+1]
+                        st.caption(f"💡 {spec.get('reason', '')}")
+                        fig = render_chart(df, spec)
+                        if fig:
+                            st.plotly_chart(fig, use_container_width=True)
+        elif "chart_specs" in st.session_state and not st.session_state.chart_specs:
+            st.warning("Could not generate chart recommendations. Try again.")
 
     with tab6:
         st.subheader("Business Insights")
