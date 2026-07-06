@@ -88,13 +88,39 @@ if uploaded_file:
             st.success("No duplicates")
 
         st.markdown("---")
-        if st.button("🧹 Clean Data Now"):
-            cleaned_df, report = clean_data(st.session_state.raw_df.copy())
-            st.session_state.df = cleaned_df
-            st.session_state.cleaned = True
-            for item in report:
-                st.write(item)
-            st.success("Done! All tabs now use cleaned data.")
+        if st.button("🤖 Generate AI Cleaning Plan"):
+            with st.spinner("Analyzing what needs cleaning..."):
+                from agents.cleaning_agent import run_cleaning_agent
+                st.session_state.cleaning_plan = run_cleaning_agent(profile)
+
+        if "cleaning_plan" in st.session_state:
+            plan = st.session_state.cleaning_plan
+            if "error" in plan:
+                st.error(plan["error"])
+                st.code(plan["raw"])
+            else:
+                st.markdown("#### AI Cleaning Plan")
+                plan_rows = []
+                for col, details in plan.get("columns", {}).items():
+                    plan_rows.append({
+                        "Column": col,
+                        "Action": details.get("action"),
+                        "Reason": details.get("reason")
+                    })
+                st.dataframe(pd.DataFrame(plan_rows), use_container_width=True)
+
+                st.markdown("---")
+                if st.button("✅ Execute Cleaning Plan"):
+                    from core.cleaner import execute_cleaning_plan
+                    cleaned_df, report = execute_cleaning_plan(
+                        st.session_state.raw_df.copy(),
+                        st.session_state.cleaning_plan
+                    )
+                    st.session_state.df = cleaned_df
+                    st.session_state.cleaned = True
+                    for item in report:
+                        st.write(item)
+                    st.success("Done! All tabs now use cleaned data.")
 
     # TAB 3 - STATS
     with tab3:
