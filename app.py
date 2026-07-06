@@ -30,8 +30,8 @@ if uploaded_file:
     if st.session_state.cleaned:
         st.info("🧹 Currently analyzing **cleaned** version of the data")
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "🔍 Profile", "🧹 Clean", "📈 Stats", "🚨 Anomalies", "📉 Charts", "🤖 AI Q&A"
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "🔍 Profile", "🧹 Clean", "📈 Stats", "🚨 Anomalies", "📉 Charts", "💡 Insights", "🤖 AI Q&A"
     ])
 
     # TAB 1 - PROFILE
@@ -175,8 +175,19 @@ if uploaded_file:
             fig4 = px.line(df, x=date_col, y=num_col_ts, title=f"{num_col_ts} over time")
             st.plotly_chart(fig4, use_container_width=True)
 
-    # TAB 6 - Q&A
     with tab6:
+        st.subheader("Business Insights")
+        if st.button("💡 Generate Business Insights"):
+            with st.spinner("Analyzing business story..."):
+                from agents.insight_agent import run_insight_agent
+                stats_summary = df.select_dtypes(include='number').describe().to_string()
+                st.session_state.insights = run_insight_agent(profile, stats_summary)
+
+        if "insights" in st.session_state:
+            st.markdown(st.session_state.insights)
+
+    # TAB 6 - Q&A
+    with tab7:
         st.subheader("Ask anything about your data")
         question = st.text_input("Your question", placeholder="e.g. Which protocol has the most anomalies?")
         if st.button("Ask AI") and question:
