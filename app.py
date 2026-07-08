@@ -118,6 +118,7 @@ if uploaded_file:
                     )
                     st.session_state.df = cleaned_df
                     st.session_state.cleaned = True
+                    st.session_state.cleaning_report = report
                     for item in report:
                         st.write(item)
                     st.success("Done! All tabs now use cleaned data.")
@@ -180,7 +181,12 @@ if uploaded_file:
             with st.spinner("Analyzing business story..."):
                 from agents.insight_agent import run_insight_agent
                 stats_summary = df.select_dtypes(include='number').describe().to_string()
-                st.session_state.insights = run_insight_agent(profile, stats_summary)
+                st.session_state.insights = run_insight_agent(
+                    profile,
+                    stats_summary,
+                    profile_analysis=st.session_state.get("profile_analysis") or "",
+                    cleaning_report=st.session_state.get("cleaning_report") or []
+                )
 
         if "insights" in st.session_state:
             st.markdown(st.session_state.insights)

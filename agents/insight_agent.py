@@ -15,7 +15,7 @@ class NumpyEncoder(json.JSONEncoder):
             return obj.tolist()
         return super().default(obj)
 
-def run_insight_agent(profile: dict, stats_summary: str) -> str:
+def run_insight_agent(profile: dict, stats_summary: str, profile_analysis: str = "", cleaning_report: list = []) -> str:
     insight_input = {
         "rows": profile["rows"],
         "columns": profile["columns"],
@@ -72,6 +72,12 @@ Be direct. Be specific. No filler sentences."""
 Additional stats:
 {stats_summary}
 
-Give your business insight analysis."""
+Senior analyst's initial findings:
+{profile_analysis}
+
+Cleaning actions taken:
+{json.dumps(cleaning_report)}
+
+Give your business insight analysis building on the analyst's findings above."""
 
     return ask_groq(prompt, system_prompt=system_prompt)
