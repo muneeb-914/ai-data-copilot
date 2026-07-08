@@ -55,9 +55,17 @@ def detect_anomalies(df: pd.DataFrame) -> list:
     anomalies = []
     numeric_df = df.select_dtypes(include='number')
     for col in numeric_df.columns:
-        mean = numeric_df[col].mean()
-        std = numeric_df[col].std()
-        outliers = numeric_df[(numeric_df[col] < mean - 3*std) | (numeric_df[col] > mean + 3*std)]
+        # Skip binary columns
+        if numeric_df[col].nunique() <= 2:
+            continue
+        Q1 = numeric_df[col].quantile(0.25)
+        Q3 = numeric_df[col].quantile(0.75)
+        IQR = Q3 - Q1
+        if IQR == 0:
+            continue
+        lower = Q1 - 1.5 * IQR
+        upper = Q3 + 1.5 * IQR
+        outliers = numeric_df[(numeric_df[col] < lower) | (numeric_df[col] > upper)]
         if not outliers.empty:
-            anomalies.append(f"{col}: {len(outliers)} outliers detected")
+            anomalies.append(f"{col}: {len(outliers)} outliers detected (IQR method) — range [{round(lower,2)}, {round(upper,2)}]")
     return anomalies if anomalies else ["No anomalies detected"]

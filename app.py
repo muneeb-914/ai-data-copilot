@@ -134,6 +134,7 @@ if uploaded_file:
     with tab4:
         st.subheader("Anomaly Detection")
         anomalies = detect_anomalies(df)
+        st.session_state.anomalies = anomalies
         for a in anomalies:
             if "No anomalies" in a:
                 st.success(a)
@@ -174,7 +175,7 @@ if uploaded_file:
                             st.plotly_chart(fig, use_container_width=True)
         elif "chart_specs" in st.session_state and not st.session_state.chart_specs:
             st.warning("Could not generate chart recommendations. Try again.")
-
+    # TAB 6 - Q&A
     with tab6:
         st.subheader("Business Insights")
         if st.button("💡 Generate Business Insights"):
@@ -191,28 +192,52 @@ if uploaded_file:
         if "insights" in st.session_state:
             st.markdown(st.session_state.insights)
 
-    # TAB 6 - Q&A
+    # TAB 7 - Q&A
     with tab7:
-        st.subheader("Ask anything about your data")
-        question = st.text_input("Your question", placeholder="e.g. Which protocol has the most anomalies?")
-        if st.button("Ask AI") and question:
+        st.subheader("💬 Chat with your Data")
+
+        # Initialize chat history
+        if "chat_history" not in st.session_state:
+            st.session_state.chat_history = []
+
+        # Clear chat button
+        if st.button("🗑️ Clear Chat"):
+            st.session_state.chat_history = []
+
+        # Display chat history
+        for msg in st.session_state.chat_history:
+            if msg["role"] == "user":
+                st.chat_message("user").markdown(msg["content"])
+            else:
+                st.chat_message("assistant").markdown(msg["content"])
+
+        # Chat input
+        question = st.chat_input("Ask anything about your data...")
+        if question:
+            # Show user message
+            st.chat_message("user").markdown(question)
+
             with st.spinner("Thinking..."):
-                sample = df.head(50).to_string()
-                prompt = f"""
-You are a data analyst. Here is a dataset sample:
-{sample}
+                from agents.chat_agent import run_chat_agent
+                df_sample = df.head(50).to_string()
+                insights = st.session_state.get("insights") or ""
 
-Dataset info:
-- Rows: {profile['rows']}, Columns: {profile['columns']}
-- Column names: {list(df.columns)}
-- Target column: {profile['guessed_target']}
+                answer = run_chat_agent(
+                        question=question,
+                        chat_history=st.session_state.chat_history,
+                        profile=profile,
+                        df_sample=df_sample,
+                        insights=insights,
+                        chart_specs=st.session_state.get("chart_specs") or [],
+                        profile_analysis=st.session_state.get("profile_analysis") or "",
+                        cleaning_report=st.session_state.get("cleaning_report") or [],
+                        anomalies=st.session_state.get("anomalies") or []
+                )
+            # Show assistant message
+            st.chat_message("assistant").markdown(answer)
 
-Answer this question: {question}
-
-Be specific and give a business-oriented answer.
-"""
-                answer = ask_groq(prompt)
-                st.markdown(answer)
-
+            # Save to history
+            st.session_state.chat_history.append({"role": "user", "content": question})
+            st.session_state.chat_history.append({"role": "assistant", "content": answer})
 else:
     st.info("👆 Upload a CSV file to get started")
