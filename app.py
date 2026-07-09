@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 from core.profiler import profile_dataset
 from agents.profile_agent import run_profile_agent
-from utils.analyzer import get_basic_stats, get_numeric_summary, detect_anomalies, clean_data
+from core.analyzer import get_basic_stats, get_numeric_summary, detect_anomalies
 from utils.groq_client import ask_groq
 
 st.set_page_config(page_title="AI Data Copilot", page_icon="🤖", layout="wide")
