@@ -30,8 +30,8 @@ if uploaded_file:
     if st.session_state.cleaned:
         st.info("🧹 Currently analyzing **cleaned** version of the data")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "🔍 Profile", "🧹 Clean", "📈 Stats", "🚨 Anomalies", "📉 Charts", "💡 Insights", "🤖 AI Q&A"
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    "🔍 Profile", "🧹 Clean", "📈 Stats", "🚨 Anomalies", "📉 Charts", "💡 Insights", "🤖 AI Q&A", "📥 Export"
     ])
 
     # TAB 1 - PROFILE
@@ -175,7 +175,7 @@ if uploaded_file:
                             st.plotly_chart(fig, use_container_width=True)
         elif "chart_specs" in st.session_state and not st.session_state.chart_specs:
             st.warning("Could not generate chart recommendations. Try again.")
-    # TAB 6 - Q&A
+    # TAB 6 - Insight
     with tab6:
         st.subheader("Business Insights")
         if st.button("💡 Generate Business Insights"):
@@ -239,5 +239,43 @@ if uploaded_file:
             # Save to history
             st.session_state.chat_history.append({"role": "user", "content": question})
             st.session_state.chat_history.append({"role": "assistant", "content": answer})
+
+        with tab8:
+            st.subheader("Export Results")
+            from core.exporter import export_cleaned_csv, export_insight_report
+    
+            col1, col2 = st.columns(2)
+    
+            with col1:
+                st.markdown("#### 📄 Cleaned Dataset")
+                if st.session_state.cleaned:
+                    csv_bytes = export_cleaned_csv(st.session_state.df)
+                    st.download_button(
+                        label="⬇️ Download Cleaned CSV",
+                        data=csv_bytes,
+                        file_name="cleaned_data.csv",
+                        mime="text/csv"
+                    )
+                else:
+                    st.warning("Clean your data first in the Clean tab.")
+    
+            with col2:
+                st.markdown("#### 📊 Insight Report")
+                report_md = export_insight_report(
+                    profile=profile,
+                    profile_analysis=st.session_state.get("profile_analysis") or "",
+                    cleaning_report=st.session_state.get("cleaning_report") or [],
+                    anomalies=st.session_state.get("anomalies") or [],
+                    insights=st.session_state.get("insights") or "",
+                    chart_specs=st.session_state.get("chart_specs") or []
+                )
+                st.download_button(
+                    label="⬇️ Download Report (.md)",
+                    data=report_md,
+                    file_name="analysis_report.md",
+                    mime="text/markdown"
+                )
+                st.markdown("#### Preview")
+                st.markdown(report_md)
 else:
     st.info("👆 Upload a CSV file to get started")

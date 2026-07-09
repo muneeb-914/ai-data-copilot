@@ -6,7 +6,7 @@ def execute_cleaning_plan(df: pd.DataFrame, cleaning_plan: dict) -> tuple[pd.Dat
     # Handle duplicates
     if cleaning_plan.get("duplicates", {}).get("action") == "remove_duplicates":
         before = len(df)
-        df.drop_duplicates(inplace=True)
+        df = df.drop_duplicates()
         removed = before - len(df)
         report.append(f"✅ Removed {removed} duplicate rows")
 
@@ -20,12 +20,12 @@ def execute_cleaning_plan(df: pd.DataFrame, cleaning_plan: dict) -> tuple[pd.Dat
 
         if action == "fill_median":
             median_val = df[col].median()
-            df[col].fillna(median_val, inplace=True)
+            df[col] = df[col].fillna(median_val)
             report.append(f"✅ '{col}': filled missing with median ({median_val:.2f}) — {reason}")
 
         elif action == "fill_mode":
             mode_val = df[col].mode()[0]
-            df[col].fillna(mode_val, inplace=True)
+            df[col] = df[col].fillna(mode_val)
             report.append(f"✅ '{col}': filled missing with mode ('{mode_val}') — {reason}")
 
         elif action == "drop_column":
