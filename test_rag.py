@@ -33,3 +33,21 @@ for c in chunks:
     print(f"File: {c['filename']} | Score: {c['score']:.4f}")
     print(f"Text: {c['text'][:120]}")
     print()
+
+
+# Stage 4: Full RAG answer test
+from rag.pipeline import answer_with_rag
+
+print("\n=== QUERY + GROQ ANSWER 1 ===")
+result = answer_with_rag("what should happen when a customer has not purchased in 90 days?")
+print("Answer:", result["answer"])
+print("Sources used:")
+for s in result["sources"]:
+    print(f"  - {s['filename']} | chunk {s['chunk_index']} | score {s['score']:.4f}")
+
+print("\n=== QUERY + GROQ ANSWER 2 ===")
+result = answer_with_rag("how should missing values in numerical columns be handled?")
+print("Answer:", result["answer"])
+print("Sources used:")
+for s in result["sources"]:
+    print(f"  - {s['filename']} | chunk {s['chunk_index']} | score {s['score']:.4f}")

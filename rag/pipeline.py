@@ -220,3 +220,87 @@ def get_pipeline_status() -> dict:
         "index_total": 0,
         "in_memory":   False,
     }
+
+
+# ── ANSWER WITH RAG ───────────────────────────────────────────────────────────
+
+def answer_with_rag(
+    question: str,
+    top_k: int = DEFAULT_TOP_K,
+) -> dict:
+    """
+    Full RAG answer flow — retrieve relevant chunks then generate an answer
+    using Groq grounded in that retrieved context.
+
+    This is the function agents call for document-based questions.
+
+    Flow:
+        1. Retrieve top-k relevant chunks for the question.
+        2. Build a context string from those chunks.
+        3. Send question + context to Groq via ask_groq().
+        4. Return the answer along with the source chunks used.
+
+    Args:
+        question: The user's question string.
+        top_k:    Number of chunks to retrieve and pass as context.
+
+    Returns:
+        {
+            "answer":  str,        # Groq's generated answer
+            "sources": list[dict]  # chunks used as context (with filename, text, score)
+        }
+        If no index exists, returns a fallback response without calling Groq.
+    """
+    from utils.groq_client import ask_groq
+
+    # ── Step 1: Retrieve relevant chunks ─────────────────────────────────────
+    chunks = query_rag_pipeline(question, top_k=top_k)
+
+    if not chunks:
+        return {
+            "answer":  "No knowledge documents are available to answer this question. Please upload documents to the knowledge/ folder first.",
+            "sources": [],
+        }
+
+    # ── Step 2: Build context string from retrieved chunks ───────────────────
+    context_parts = []
+    for i, chunk in enumerate(chunks):
+        context_parts.append(
+            f"[Source {i + 1}: {chunk['filename']}]\n{chunk['text']}"
+        )
+    context = "\n\n---\n\n".join(context_parts)
+
+    # ── Step 3: Build prompt and call Groq ───────────────────────────────────
+    system_prompt = """You are a knowledgeable data operations assistant.
+You answer questions strictly based on the context provided to you.
+If the context does not contain enough information to answer the question, say so clearly.
+Do not make up information that is not in the context.
+Always be concise and precise."""
+
+    prompt = f"""Use the following retrieved context to answer the question below.
+
+CONTEXT:
+{context}
+
+QUESTION:
+{question}
+
+ANSWER:"""
+
+    print(f"[Pipeline] Sending question + {len(chunks)} chunk(s) to Groq...")
+    answer = ask_groq(prompt, system_prompt=system_prompt)
+    print(f"[Pipeline] Groq answered successfully.")
+
+    # ── Step 4: Return answer + sources ──────────────────────────────────────
+    return {
+        "answer":  answer,
+        "sources": [
+            {
+                "filename":    c["filename"],
+                "chunk_index": c["chunk_index"],
+                "score":       c["score"],
+                "text":        c["text"],
+            }
+            for c in chunks
+        ],
+    }
