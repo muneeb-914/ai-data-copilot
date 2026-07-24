@@ -1,0 +1,67 @@
+Cybersecurity Intrusion Detection - Internal Policy Document
+
+SECTION 1: Attack Detection Thresholds
+
+A network session is flagged as a confirmed attack if any of the following conditions are met:
+- Failed logins exceed 3 in a single session
+- Login attempts exceed 7 in a single session
+- IP reputation score is above 0.75 (high risk threshold)
+- Network packet size exceeds 1000 bytes combined with unusual time access
+
+Sessions with IP reputation score between 0.50 and 0.75 are classified as medium risk and require manual review by the security team within 4 hours.
+
+Sessions with IP reputation score below 0.50 are classified as low risk but must still be logged.
+
+SECTION 2: Protocol Risk Classification
+
+Protocols are ranked by risk level as follows:
+- ICMP: Highest risk — commonly used in ping flood and DDoS attacks. Any ICMP session with unusual time access must be escalated immediately.
+- UDP: Medium risk — susceptible to UDP flood attacks. Monitor sessions with packet sizes above 800 bytes.
+- TCP: Lowest risk among the three but must still be monitored for SYN flood patterns.
+
+All ICMP sessions lasting more than 300 seconds must be terminated automatically.
+
+SECTION 3: Encryption Standards
+
+The organization mandates the following encryption standards:
+- AES encryption is the required standard for all sessions. Sessions using AES are considered compliant.
+- DES encryption is deprecated and must not be used. Any active session detected using DES must be flagged for immediate review.
+- Sessions with no encryption detected must be terminated immediately and the source IP blocked for 24 hours.
+
+As of this policy, DES usage in sessions is a compliance violation regardless of whether an attack was detected.
+
+SECTION 4: Browser and Access Anomalies
+
+Browser type Unknown indicates that the user agent string could not be identified. This is a strong indicator of automated bot traffic or a spoofed session. All Unknown browser sessions must be reviewed.
+
+Unusual time access flag set to 1 means the session occurred outside standard business hours (9 AM to 6 PM local time). Unusual time access combined with failed logins above 2 is an automatic escalation trigger.
+
+SECTION 5: Data Cleaning Standards for This Dataset
+
+session_id column must be dropped before any machine learning model training as it is a unique identifier with no predictive value.
+
+ip_reputation_score missing values must be filled using the median strategy. Do not use mean due to the skewed distribution of reputation scores.
+
+failed_logins missing values must be filled with 0 as absence of a record implies no failed login was recorded.
+
+Columns with more than 35 percent missing values must be dropped entirely.
+
+Duplicate sessions identified by matching session_id values must be removed immediately.
+
+SECTION 6: Incident Response SLAs
+
+Critical incidents (attack_detected = 1 with failed_logins >= 3): Response required within 15 minutes.
+High incidents (attack_detected = 1 with failed_logins < 3): Response required within 1 hour.
+Medium incidents (attack_detected = 0 but IP reputation score > 0.5): Review required within 4 hours.
+Low incidents (attack_detected = 0 and IP reputation score <= 0.5): Log and review within 24 hours.
+
+SECTION 7: Reporting Requirements
+
+Weekly security reports must include:
+- Total number of sessions analyzed
+- Percentage of sessions where attack_detected equals 1
+- Top 3 protocols involved in detected attacks
+- Count of DES encrypted sessions flagged for compliance review
+- Count of Unknown browser sessions reviewed
+
+Monthly reports must include trend analysis comparing attack detection rates across the current and previous month.

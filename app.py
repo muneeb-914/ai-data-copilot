@@ -11,6 +11,100 @@ st.set_page_config(page_title="AI Data Copilot", page_icon="🤖", layout="wide"
 st.title("🤖 AI Data Operations Copilot")
 st.markdown("Upload your data and let AI analyze it for you.")
 
+# ── SIDEBAR: Knowledge Document Upload (Milestone 4) ─────────────────────────
+with st.sidebar:
+    st.markdown("## 📚 Knowledge Documents")
+    st.markdown("Upload documents to give AI additional context.")
+
+    uploaded_docs = st.file_uploader(
+        "Upload PDF, DOCX, TXT, or MD files",
+        type=["pdf", "docx", "txt", "md"],
+        accept_multiple_files=True,
+        key="knowledge_uploader"
+    )
+
+    if uploaded_docs:
+        import os
+        from pathlib import Path
+        from rag.pipeline import build_rag_pipeline, get_pipeline_status, rebuild_rag_pipeline
+
+        knowledge_dir = Path("knowledge")
+        knowledge_dir.mkdir(exist_ok=True)
+
+        # Track which docs are currently uploaded
+        uploaded_names = [f.name for f in uploaded_docs]
+
+        # Save new uploads to knowledge/ folder
+        newly_saved = []
+        for doc in uploaded_docs:
+            doc_path = knowledge_dir / doc.name
+            if not doc_path.exists():
+                with open(doc_path, "wb") as f:
+                    f.write(doc.read())
+                newly_saved.append(doc.name)
+
+        # If new documents were saved, rebuild the index
+        if newly_saved:
+            st.info(f"📄 New document(s) detected: {', '.join(newly_saved)}")
+            with st.spinner("Indexing documents..."):
+                result = rebuild_rag_pipeline()
+            if result["status"] == "built":
+                st.success(
+                    f"✅ Indexed {result['documents']} document(s) → "
+                    f"{result['chunks']} chunks → "
+                    f"{result['index_total']} vectors"
+                )
+                st.session_state.rag_ready = True
+            elif result["status"] == "empty":
+                st.warning("No supported documents found in knowledge/ folder.")
+                st.session_state.rag_ready = False
+        else:
+            # Documents already saved — load existing index
+            status = get_pipeline_status()
+            if status["ready"]:
+                st.session_state.rag_ready = True
+            else:
+                with st.spinner("Loading knowledge index..."):
+                    build_rag_pipeline()
+                st.session_state.rag_ready = True
+
+        # Show current index status
+        st.markdown("---")
+        st.markdown("#### 📊 Knowledge Index Status")
+        status = get_pipeline_status()
+        if status["ready"] and status["in_memory"]:
+            st.success(f"🟢 Active — {status['index_total']} vectors loaded")
+        elif status["ready"] and not status["in_memory"]:
+            st.info("🟡 Index on disk — will load on first query")
+        else:
+            st.error("🔴 No index found")
+
+        # Show uploaded documents list
+        st.markdown("#### 📄 Uploaded Documents")
+        for doc in uploaded_docs:
+            st.markdown(f"- `{doc.name}`")
+
+        # Manual rebuild button
+        st.markdown("---")
+        if st.button("🔄 Rebuild Index"):
+            with st.spinner("Rebuilding knowledge index..."):
+                result = rebuild_rag_pipeline()
+            st.success(f"✅ Rebuilt — {result['index_total']} vectors")
+            st.session_state.rag_ready = True
+
+    else:
+        st.info("No documents uploaded yet.")
+        st.session_state.rag_ready = False
+
+    # Show RAG status badge at bottom of sidebar
+    st.markdown("---")
+    rag_ready = st.session_state.get("rag_ready", False)
+    if rag_ready:
+        st.markdown("**RAG Status:** 🟢 Active")
+    else:
+        st.markdown("**RAG Status:** 🔴 Inactive")
+
+# ── MAIN: CSV Upload ──────────────────────────────────────────────────────────
 uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
 
 if uploaded_file:
@@ -25,10 +119,13 @@ if uploaded_file:
 
     df = st.session_state.df
     profile = st.session_state.profile
+    rag_ready = st.session_state.get("rag_ready", False)
 
     st.success(f"✅ Loaded {profile['rows']} rows and {profile['columns']} columns")
     if st.session_state.cleaned:
         st.info("🧹 Currently analyzing **cleaned** version of the data")
+    if rag_ready:
+        st.info("📚 Knowledge documents are active — AI agents will use them for context")
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "🔍 Profile", "🧹 Clean", "📈 Stats", "🚨 Anomalies", "📉 Charts", "💡 Insights", "🤖 AI Q&A", "📥 Export"
@@ -91,7 +188,10 @@ if uploaded_file:
         if st.button("🤖 Generate AI Cleaning Plan"):
             with st.spinner("Analyzing what needs cleaning..."):
                 from agents.cleaning_agent import run_cleaning_agent
-                st.session_state.cleaning_plan = run_cleaning_agent(profile)
+                st.session_state.cleaning_plan = run_cleaning_agent(
+                    profile,
+                    use_rag=rag_ready       # uses company cleaning policies if available
+                )
 
         if "cleaning_plan" in st.session_state:
             plan = st.session_state.cleaning_plan
@@ -141,7 +241,7 @@ if uploaded_file:
             else:
                 st.warning(a)
 
-    # TAB 5 - CHARTS (data-driven based on profile)
+    # TAB 5 - CHARTS
     with tab5:
         st.subheader("AI-Recommended Charts")
 
@@ -157,7 +257,6 @@ if uploaded_file:
             from core.charts import render_chart
             specs = st.session_state.chart_specs
 
-            # Render in 2 column grid
             for i in range(0, len(specs), 2):
                 col1, col2 = st.columns(2)
                 with col1:
@@ -175,9 +274,13 @@ if uploaded_file:
                             st.plotly_chart(fig, use_container_width=True)
         elif "chart_specs" in st.session_state and not st.session_state.chart_specs:
             st.warning("Could not generate chart recommendations. Try again.")
-    # TAB 6 - Insight
+
+    # TAB 6 - INSIGHTS
     with tab6:
         st.subheader("Business Insights")
+        if rag_ready:
+            st.info("📚 Knowledge documents will be used to enrich insights")
+
         if st.button("💡 Generate Business Insights"):
             with st.spinner("Analyzing business story..."):
                 from agents.insight_agent import run_insight_agent
@@ -186,7 +289,8 @@ if uploaded_file:
                     profile,
                     stats_summary,
                     profile_analysis=st.session_state.get("profile_analysis") or "",
-                    cleaning_report=st.session_state.get("cleaning_report") or []
+                    cleaning_report=st.session_state.get("cleaning_report") or [],
+                    use_rag=rag_ready       # uses domain knowledge if available
                 )
 
         if "insights" in st.session_state:
@@ -195,26 +299,23 @@ if uploaded_file:
     # TAB 7 - Q&A
     with tab7:
         st.subheader("💬 Chat with your Data")
+        if rag_ready:
+            st.info("📚 Knowledge documents are active — ask questions about both your data and uploaded documents")
 
-        # Initialize chat history
         if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
 
-        # Clear chat button
         if st.button("🗑️ Clear Chat"):
             st.session_state.chat_history = []
 
-        # Display chat history
         for msg in st.session_state.chat_history:
             if msg["role"] == "user":
                 st.chat_message("user").markdown(msg["content"])
             else:
                 st.chat_message("assistant").markdown(msg["content"])
 
-        # Chat input
         question = st.chat_input("Ask anything about your data...")
         if question:
-            # Show user message
             st.chat_message("user").markdown(question)
 
             with st.spinner("Thinking..."):
@@ -223,59 +324,61 @@ if uploaded_file:
                 insights = st.session_state.get("insights") or ""
 
                 answer = run_chat_agent(
-                        question=question,
-                        chat_history=st.session_state.chat_history,
-                        profile=profile,
-                        df_sample=df_sample,
-                        insights=insights,
-                        chart_specs=st.session_state.get("chart_specs") or [],
-                        profile_analysis=st.session_state.get("profile_analysis") or "",
-                        cleaning_report=st.session_state.get("cleaning_report") or [],
-                        anomalies=st.session_state.get("anomalies") or []
-                )
-            # Show assistant message
-            st.chat_message("assistant").markdown(answer)
-
-            # Save to history
-            st.session_state.chat_history.append({"role": "user", "content": question})
-            st.session_state.chat_history.append({"role": "assistant", "content": answer})
-
-        with tab8:
-            st.subheader("Export Results")
-            from core.exporter import export_cleaned_csv, export_insight_report
-    
-            col1, col2 = st.columns(2)
-    
-            with col1:
-                st.markdown("#### 📄 Cleaned Dataset")
-                if st.session_state.cleaned:
-                    csv_bytes = export_cleaned_csv(st.session_state.df)
-                    st.download_button(
-                        label="⬇️ Download Cleaned CSV",
-                        data=csv_bytes,
-                        file_name="cleaned_data.csv",
-                        mime="text/csv"
-                    )
-                else:
-                    st.warning("Clean your data first in the Clean tab.")
-    
-            with col2:
-                st.markdown("#### 📊 Insight Report")
-                report_md = export_insight_report(
+                    question=question,
+                    chat_history=st.session_state.chat_history,
                     profile=profile,
+                    df_sample=df_sample,
+                    insights=insights,
+                    chart_specs=st.session_state.get("chart_specs") or [],
                     profile_analysis=st.session_state.get("profile_analysis") or "",
                     cleaning_report=st.session_state.get("cleaning_report") or [],
                     anomalies=st.session_state.get("anomalies") or [],
-                    insights=st.session_state.get("insights") or "",
-                    chart_specs=st.session_state.get("chart_specs") or []
+                    use_rag=rag_ready       # uses knowledge documents if available
                 )
+
+            st.chat_message("assistant").markdown(answer)
+
+            st.session_state.chat_history.append({"role": "user", "content": question})
+            st.session_state.chat_history.append({"role": "assistant", "content": answer})
+
+    # TAB 8 - EXPORT
+    with tab8:
+        st.subheader("Export Results")
+        from core.exporter import export_cleaned_csv, export_insight_report
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("#### 📄 Cleaned Dataset")
+            if st.session_state.cleaned:
+                csv_bytes = export_cleaned_csv(st.session_state.df)
                 st.download_button(
-                    label="⬇️ Download Report (.md)",
-                    data=report_md,
-                    file_name="analysis_report.md",
-                    mime="text/markdown"
+                    label="⬇️ Download Cleaned CSV",
+                    data=csv_bytes,
+                    file_name="cleaned_data.csv",
+                    mime="text/csv"
                 )
-                st.markdown("#### Preview")
-                st.markdown(report_md)
+            else:
+                st.warning("Clean your data first in the Clean tab.")
+
+        with col2:
+            st.markdown("#### 📊 Insight Report")
+            report_md = export_insight_report(
+                profile=profile,
+                profile_analysis=st.session_state.get("profile_analysis") or "",
+                cleaning_report=st.session_state.get("cleaning_report") or [],
+                anomalies=st.session_state.get("anomalies") or [],
+                insights=st.session_state.get("insights") or "",
+                chart_specs=st.session_state.get("chart_specs") or []
+            )
+            st.download_button(
+                label="⬇️ Download Report (.md)",
+                data=report_md,
+                file_name="analysis_report.md",
+                mime="text/markdown"
+            )
+            st.markdown("#### Preview")
+            st.markdown(report_md)
+
 else:
     st.info("👆 Upload a CSV file to get started")
