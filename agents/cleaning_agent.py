@@ -15,8 +15,11 @@ class NumpyEncoder(json.JSONEncoder):
             return obj.tolist()
         return super().default(obj)
 
-def run_cleaning_agent(profile: dict) -> dict:
-    # Only send relevant info, not the full profile
+def run_cleaning_agent(
+    profile: dict,
+    use_rag: bool = False,        # NEW: whether to retrieve company cleaning policies
+) -> dict:
+
     cleaning_input = {
         "rows": profile["rows"],
         "duplicates": profile["duplicates"],
@@ -33,6 +36,30 @@ def run_cleaning_agent(profile: dict) -> dict:
 
     input_json = json.dumps(cleaning_input, indent=2, cls=NumpyEncoder)
 
+    # ── RAG: Retrieve company cleaning policies if documents exist ────────────
+    rag_context = ""
+    if use_rag:
+        try:
+            from rag.pipeline import query_rag_pipeline, get_pipeline_status
+            status = get_pipeline_status()
+            if status["ready"]:
+                chunks = query_rag_pipeline(
+                    "data cleaning policy missing values duplicates columns",
+                    top_k=3
+                )
+                if chunks:
+                    parts = []
+                    for i, chunk in enumerate(chunks):
+                        parts.append(
+                            f"[Knowledge Source {i + 1}: {chunk['filename']}]\n{chunk['text']}"
+                        )
+                    rag_context = "\n\n---\n\n".join(parts)
+                    print(f"[CleaningAgent] RAG retrieved {len(chunks)} chunk(s) for context.")
+            else:
+                print("[CleaningAgent] RAG pipeline not ready — skipping retrieval.")
+        except Exception as e:
+            print(f"[CleaningAgent] RAG retrieval failed — skipping. Error: {e}")
+
     system_prompt = """You are a data cleaning expert.
 You receive a dataset profile and must return a JSON cleaning plan.
 For each column with missing values, decide:
@@ -43,6 +70,9 @@ For each column with missing values, decide:
 
 Also decide on duplicates:
 - "remove_duplicates": true or false
+
+If company cleaning policies are provided in the context below, follow them.
+They override the default rules above where they conflict.
 
 Return ONLY a valid JSON object. No explanation. No markdown. No backticks.
 Example format:
@@ -57,19 +87,25 @@ Example format:
 }"""
 
     prompt = f"""Here is the dataset profile:
-{input_json}
+{input_json}"""
+
+    # ── Append RAG context if available ──────────────────────────────────────
+    if rag_context:
+        prompt += f"""
+
+Company Cleaning Policies (follow these where they apply):
+{rag_context}"""
+
+    prompt += """
 
 Return the cleaning plan as JSON."""
 
     response = ask_groq(prompt, system_prompt=system_prompt)
 
-    # Parse the JSON response
     try:
-        # Strip any accidental markdown
         clean_response = response.strip().strip("```json").strip("```").strip()
         cleaning_plan = json.loads(clean_response)
     except json.JSONDecodeError:
-        # Fallback: basic plan if Groq returns unexpected format
         cleaning_plan = {"error": "Could not parse cleaning plan", "raw": response}
 
     return cleaning_plan

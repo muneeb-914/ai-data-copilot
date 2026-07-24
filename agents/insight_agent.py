@@ -15,7 +15,14 @@ class NumpyEncoder(json.JSONEncoder):
             return obj.tolist()
         return super().default(obj)
 
-def run_insight_agent(profile: dict, stats_summary: str, profile_analysis: str = "", cleaning_report: list = []) -> str:
+def run_insight_agent(
+    profile: dict,
+    stats_summary: str,
+    profile_analysis: str = "",
+    cleaning_report: list = [],
+    use_rag: bool = False,        # NEW: whether to retrieve from knowledge documents
+) -> str:
+
     insight_input = {
         "rows": profile["rows"],
         "columns": profile["columns"],
@@ -42,6 +49,32 @@ def run_insight_agent(profile: dict, stats_summary: str, profile_analysis: str =
             }
 
     input_json = json.dumps(insight_input, indent=2, cls=NumpyEncoder)
+
+    # ── RAG: Retrieve relevant knowledge if documents exist ──────────────────
+    rag_context = ""
+    if use_rag:
+        try:
+            from rag.pipeline import query_rag_pipeline, get_pipeline_status
+            status = get_pipeline_status()
+            if status["ready"]:
+                # Query using a business-oriented question built from profile
+                rag_query = (
+                    f"business insights and analysis rules for dataset with columns: "
+                    f"{list(profile['column_details'].keys())}"
+                )
+                chunks = query_rag_pipeline(rag_query, top_k=3)
+                if chunks:
+                    parts = []
+                    for i, chunk in enumerate(chunks):
+                        parts.append(
+                            f"[Knowledge Source {i + 1}: {chunk['filename']}]\n{chunk['text']}"
+                        )
+                    rag_context = "\n\n---\n\n".join(parts)
+                    print(f"[InsightAgent] RAG retrieved {len(chunks)} chunk(s) for context.")
+            else:
+                print("[InsightAgent] RAG pipeline not ready — skipping retrieval.")
+        except Exception as e:
+            print(f"[InsightAgent] RAG retrieval failed — skipping. Error: {e}")
 
     system_prompt = """You are a senior business analyst presenting findings to a non-technical executive.
 
@@ -76,7 +109,19 @@ Senior analyst's initial findings:
 {profile_analysis}
 
 Cleaning actions taken:
-{json.dumps(cleaning_report)}
+{json.dumps(cleaning_report)}"""
+
+    # ── Append RAG context if available ──────────────────────────────────────
+    if rag_context:
+        prompt += f"""
+
+Retrieved Knowledge Documents:
+Use the following domain knowledge and business rules to enrich your analysis.
+Where relevant, reference these policies or rules in your recommendations.
+
+{rag_context}"""
+
+    prompt += """
 
 Give your business insight analysis building on the analyst's findings above."""
 
