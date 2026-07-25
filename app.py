@@ -341,10 +341,11 @@ if uploaded_file:
             st.session_state.chat_history.append({"role": "user", "content": question})
             st.session_state.chat_history.append({"role": "assistant", "content": answer})
 
+    
     # TAB 8 - EXPORT
     with tab8:
         st.subheader("Export Results")
-        from core.exporter import export_cleaned_csv, export_insight_report
+        from core.exporter import export_cleaned_csv, export_insight_report, export_chat_with_citations
 
         col1, col2 = st.columns(2)
 
@@ -380,5 +381,25 @@ if uploaded_file:
             st.markdown("#### Preview")
             st.markdown(report_md)
 
+        # Chat export with citations
+        st.markdown("---")
+        st.markdown("#### 💬 Chat History with Citations")
+        if st.session_state.get("chat_history"):
+            knowledge_docs = [f.name for f in (uploaded_docs or [])]
+            chat_report = export_chat_with_citations(
+                chat_history=st.session_state.chat_history,
+                dataset_name=uploaded_file.name,
+                knowledge_docs=knowledge_docs,
+            )
+            st.download_button(
+                label="⬇️ Download Chat Report (.md)",
+                data=chat_report,
+                file_name="chat_report_with_citations.md",
+                mime="text/markdown"
+            )
+            st.markdown("#### Preview")
+            st.markdown(chat_report)
+        else:
+            st.info("No chat history yet. Ask questions in the AI Q&A tab first.")
 else:
     st.info("👆 Upload a CSV file to get started")
