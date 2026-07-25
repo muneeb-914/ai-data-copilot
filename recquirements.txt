@@ -4,3 +4,7 @@ plotly
 groq
 python-dotenv
 numpy
+pypdf
+python-docx
+fastembed
+faiss-cpu
