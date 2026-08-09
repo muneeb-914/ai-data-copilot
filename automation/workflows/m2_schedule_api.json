@@ -1,0 +1,117 @@
+{
+  "name": "AI Copilot V3 — Schedule → FastAPI → Report",
+  "nodes": [
+    {
+      "id": "c3d4e5f6-0001-0001-0001-000000000001",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "notes": "Fires every 1 minute for testing. Change to cron for production."
+    },
+    {
+      "id": "c3d4e5f6-0002-0002-0002-000000000002",
+      "name": "Health Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8000/health",
+        "authentication": "none",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false
+            }
+          }
+        }
+      },
+      "notes": "Pings the FastAPI /health endpoint. If this fails — API is not running. Start it with: uvicorn automation.scripts.api:app --reload --port 8000"
+    },
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000003",
+      "name": "Run Pipeline",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/analyze-by-path",
+        "authentication": "none",
+        "contentType": "json",
+        "body": {
+          "csv_path": "data/test.csv"
+        },
+        "options": {}
+      },
+      "notes": "Calls /analyze-by-path with a CSV file path. Change csv_path to your actual dataset. The API reads it, runs all V2 agents, returns JSON report."
+    },
+    {
+      "id": "c3d4e5f6-0004-0004-0004-000000000004",
+      "name": "Send Report Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [900, 300],
+      "parameters": {
+        "fromEmail": "your_sender@gmail.com",
+        "toEmail": "mu181842@gmail.com",
+        "subject": "=AI Copilot V3 — Analysis Complete: {{ $json.filename }} ({{ $json.overall_status }})",
+        "emailType": "html",
+        "message": "=<h2>AI Data Operations Copilot V3</h2><p><strong>File:</strong> {{ $json.filename }}<br><strong>Status:</strong> {{ $json.overall_status }}<br><strong>Rows:</strong> {{ $json.rows }}<br><strong>Columns:</strong> {{ $json.columns }}<br><strong>Duration:</strong> {{ $json.duration_seconds }}s</p><h3>Insights</h3><p>{{ $json.insights }}</p><h3>Anomaly Summary</h3><p>{{ $json.anomaly_summary }}</p><hr><p><em>Report saved to: {{ $json.report_saved_to }}</em></p>",
+        "options": {}
+      },
+      "credentials": {
+        "smtp": {
+          "id": "REPLACE_WITH_YOUR_SMTP_CREDENTIAL_ID",
+          "name": "SMTP Account"
+        }
+      },
+      "notes": "Sends the pipeline output as an HTML email. Configure SMTP credentials in n8n Settings > Credentials first."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [{"node": "Health Check", "type": "main", "index": 0}]
+      ]
+    },
+    "Health Check": {
+      "main": [
+        [{"node": "Run Pipeline", "type": "main", "index": 0}]
+      ]
+    },
+    "Run Pipeline": {
+      "main": [
+        [{"node": "Send Report Email", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "c3d4e5f6-ffff-ffff-ffff-000000000003",
+  "_notes": {
+    "purpose": "Milestone 2 — n8n orchestrates V2 pipeline via FastAPI. No Execute Command needed.",
+    "how_to_test": [
+      "1. Install deps: pip install fastapi uvicorn python-multipart",
+      "2. Start API from project root: uvicorn automation.scripts.api:app --reload --port 8000",
+      "3. Open browser: http://localhost:8000/docs — you should see the API docs",
+      "4. Test health manually: http://localhost:8000/health",
+      "5. Import this JSON into n8n",
+      "6. Update csv_path in 'Run Pipeline' node to an actual CSV in your data/ folder",
+      "7. Click Test Workflow — watch Health Check and Run Pipeline go green"
+    ]
+  }
+}

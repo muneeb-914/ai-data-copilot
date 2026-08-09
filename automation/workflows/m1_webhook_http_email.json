@@ -1,0 +1,104 @@
+{
+  "name": "AI Copilot V3 — M1 Webhook + HTTP Request + Email",
+  "nodes": [
+    {
+      "id": "b2c3d4e5-0001-0001-0001-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "ai-copilot-analyze-test",
+      "parameters": {
+        "path": "analyze-test",
+        "responseMode": "onReceived",
+        "responseData": "allEntries",
+        "options": {}
+      },
+      "notes": "Listens at: http://localhost:5678/webhook/analyze-test (test URL while workflow inactive) or /webhook-test/analyze-test (while testing). In V3 final, FastAPI will POST here when a new CSV lands."
+    },
+    {
+      "id": "b2c3d4e5-0002-0002-0002-000000000002",
+      "name": "Test HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "https://httpbin.org/json",
+        "authentication": "none",
+        "options": {}
+      },
+      "notes": "Calls httpbin.org/json — a free testing API that returns predictable JSON. In V3 final, this node calls your FastAPI endpoint: POST http://localhost:8000/analyze with the dataset path as the body."
+    },
+    {
+      "id": "b2c3d4e5-0003-0003-0003-000000000003",
+      "name": "Send Report Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [720, 300],
+      "parameters": {
+        "fromEmail": "your_sender@gmail.com",
+        "toEmail": "mu181842@gmail.com",
+        "subject": "=AI Copilot V3 — Pipeline Triggered at {{ $now.format('yyyy-MM-dd HH:mm') }}",
+        "emailType": "html",
+        "message": "=<h2>AI Data Operations Copilot V3</h2><p>Pipeline triggered via webhook.</p><h3>HTTP Test Response</h3><pre>{{ JSON.stringify($json, null, 2) }}</pre><p><em>Sent by n8n at {{ $now }}</em></p>",
+        "options": {}
+      },
+      "credentials": {
+        "smtp": {
+          "id": "REPLACE_WITH_YOUR_SMTP_CREDENTIAL_ID",
+          "name": "SMTP Account"
+        }
+      },
+      "notes": "SETUP REQUIRED: Go to n8n Settings > Credentials > Add SMTP credential. Use Gmail App Password (not your real password). Host: smtp.gmail.com, Port: 465, SSL: on. Then replace the credential ID above with the one n8n assigns."
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Test HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Send Report Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "b2c3d4e5-ffff-ffff-ffff-000000000002",
+  "_notes": {
+    "purpose": "Milestone 1 — demonstrates Webhook, HTTP Request, and Email Send nodes",
+    "nodes_covered": ["Webhook", "HTTP Request", "Email Send"],
+    "how_to_test_webhook_without_email": [
+      "1. Import this JSON into n8n",
+      "2. Click 'Test Workflow' (do NOT activate yet — test mode uses /webhook-test/ URL)",
+      "3. In a terminal or Postman: curl -X POST http://localhost:5678/webhook-test/analyze-test",
+      "4. Watch n8n UI — you should see the webhook fire and the HTTP Request execute",
+      "5. Email node will fail until SMTP credentials are configured — that is expected"
+    ],
+    "how_to_setup_gmail_smtp": [
+      "1. Google Account > Security > 2-Step Verification (enable if not on)",
+      "2. Google Account > Security > App Passwords > generate one for 'Mail'",
+      "3. In n8n: Settings > Credentials > New > SMTP",
+      "   Host: smtp.gmail.com | Port: 465 | SSL: true",
+      "   User: your Gmail address | Password: the App Password (16 chars)",
+      "4. Save credential, copy its ID, replace REPLACE_WITH_YOUR_SMTP_CREDENTIAL_ID above"
+    ]
+  }
+}

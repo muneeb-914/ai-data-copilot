@@ -11,3 +11,12 @@ knowledge/*
 
 # FAISS index (generated at runtime — not committed)
 rag/faiss_index/
+
+# V3 — automation outputs
+automation/reports/*
+!automation/reports/.gitkeep
+automation/logs/*
+!automation/logs/.gitkeep
+
+# Datasets
+data/*.csv

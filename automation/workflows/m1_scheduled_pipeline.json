@@ -1,0 +1,85 @@
+{
+  "name": "AI Copilot V3 — M1 Schedule + Execute + File",
+  "nodes": [
+    {
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "notes": "Fires every 1 minute for testing. Change to cronExpression for production (e.g. 0 9 * * 1-5 = weekdays 9am)."
+    },
+    {
+      "id": "a1b2c3d4-0002-0002-0002-000000000002",
+      "name": "Execute Pipeline Test",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [480, 300],
+      "parameters": {
+        "command": "python automation/scripts/test_setup.py"
+      },
+      "notes": "IMPORTANT: n8n must be started from the project root for this path to resolve. Run: n8n start (from ai-data-copilot/). Output lands in $json.stdout — it is JSON because test_setup.py prints JSON."
+    },
+    {
+      "id": "a1b2c3d4-0003-0003-0003-000000000003",
+      "name": "Read Execution Log",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [720, 300],
+      "parameters": {
+        "filePath": "automation/logs/test_run.log",
+        "dataPropertyName": "log_data"
+      },
+      "notes": "Reads the log file written by test_setup.py. Demonstrates the File node. Binary content is base64 — decode in next node if needed. Only works after at least one Execute run."
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Execute Pipeline Test",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Pipeline Test": {
+      "main": [
+        [
+          {
+            "node": "Read Execution Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "a1b2c3d4-ffff-ffff-ffff-000000000001",
+  "_notes": {
+    "purpose": "Milestone 1 — demonstrates Schedule Trigger, Execute Command, and File nodes",
+    "nodes_covered": ["Schedule Trigger", "Execute Command", "Read/Write File"],
+    "how_to_test": [
+      "1. Import this JSON into n8n (Workflows > Import from File)",
+      "2. Open the workflow, click 'Test Workflow' or activate it",
+      "3. Check automation/logs/test_run.log — should see a JSON line per execution",
+      "4. In n8n execution view, check Execute Pipeline Test output — status should be OK or PARTIAL"
+    ]
+  }
+}
