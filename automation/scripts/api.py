@@ -8,9 +8,11 @@ Start server (run from project root):
     uvicorn automation.scripts.api:app --reload --port 8000
 
 Endpoints:
-    GET  /health           → quick health check (n8n uses this to verify API is alive)
-    POST /analyze          → upload a CSV file, runs full V2 pipeline, returns JSON report
-    POST /analyze-by-path  → pass a local CSV path in JSON body (easier for n8n folder watcher)
+    GET  /health           → quick health check
+    GET  /rag-status       → check RAG index status + list uploaded docs
+    POST /upload-docs      → upload PDF/DOCX/TXT/MD → saves to knowledge/ → rebuilds RAG index
+    POST /analyze          → upload CSV, runs full V2 pipeline (RAG auto-enabled if docs exist)
+    POST /analyze-by-path  → pass local CSV path in JSON body (easier for n8n folder watcher)
 """
 
 import sys
@@ -22,6 +24,7 @@ import tempfile
 import traceback
 from datetime import datetime
 from pathlib import Path
+from typing import List
 
 # ── add project root to sys.path ──────────────────────────────────────────────
 # This file lives at: <root>/automation/scripts/api.py
@@ -39,14 +42,18 @@ except ImportError:
 # ── stdlib / third-party ──────────────────────────────────────────────────────
 import pandas as pd
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 
 # ── output dirs ───────────────────────────────────────────────────────────────
-REPORTS_DIR = ROOT / "automation" / "reports"
-LOGS_DIR    = ROOT / "automation" / "logs"
+REPORTS_DIR   = ROOT / "automation" / "reports"
+LOGS_DIR      = ROOT / "automation" / "logs"
+KNOWLEDGE_DIR = ROOT / "knowledge"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
+KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
+
+ALLOWED_DOC_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -73,9 +80,23 @@ def _safe_run(step_name: str, fn, *args, **kwargs):
         return None, f"{type(e).__name__}: {e}"
 
 
+def _rag_ready() -> bool:
+    """Returns True if the RAG index is built and ready to use."""
+    try:
+        from rag.pipeline import get_pipeline_status
+        return get_pipeline_status().get("ready", False)
+    except Exception:
+        return False
+
+
 def run_v2_pipeline(df: pd.DataFrame, filename: str) -> dict:
     steps   = {}
     t_start = time.time()
+
+    # ── 0. RAG auto-detect ────────────────────────────────────────────────────
+    # If documents exist in knowledge/ and index is built, enable RAG for all agents.
+    # No manual flag needed — pipeline checks automatically every run.
+    use_rag = _rag_ready()
 
     # ── 1. Profiler ───────────────────────────────────────────────────────────
     # Returns profile dict with rows, columns, column_details, numeric_cols, etc.
@@ -103,7 +124,7 @@ def run_v2_pipeline(df: pd.DataFrame, filename: str) -> dict:
     if profile:
         from agents.cleaning_agent import run_cleaning_agent
         cleaning_plan, err = _safe_run(
-            "cleaning_agent", run_cleaning_agent, profile
+            "cleaning_agent", run_cleaning_agent, profile, use_rag
         )
         steps["cleaning_agent"] = {"status": "OK" if not err else "FAIL", "error": err}
     else:
@@ -157,7 +178,7 @@ def run_v2_pipeline(df: pd.DataFrame, filename: str) -> dict:
         from agents.insight_agent import run_insight_agent
         insights, err = _safe_run(
             "insight_agent", run_insight_agent,
-            profile, stats_summary, profile_analysis, cleaning_report
+            profile, stats_summary, profile_analysis, cleaning_report, use_rag
         )
         steps["insight_agent"] = {"status": "OK" if not err else "FAIL", "error": err}
     else:
@@ -182,6 +203,7 @@ def run_v2_pipeline(df: pd.DataFrame, filename: str) -> dict:
         "rows":             int(df.shape[0]),
         "columns":          int(df.shape[1]),
         "duration_seconds": round(time.time() - t_start, 2),
+        "rag_used":         use_rag,
         "steps":            steps,
         "insights":         insights,
         "chart_specs":      chart_specs,
@@ -247,6 +269,121 @@ def health():
         "groq_key_set": groq_ok,
         "version":      "V3",
     }
+
+
+@app.get("/rag-status")
+def rag_status():
+    """
+    Returns whether the RAG index is ready and lists all docs in knowledge/.
+    Call this after uploading documents to confirm the index rebuilt correctly.
+    """
+    docs = [
+        f.name for f in KNOWLEDGE_DIR.iterdir()
+        if f.is_file() and f.suffix in ALLOWED_DOC_EXTENSIONS
+    ]
+    ready = _rag_ready()
+    return {
+        "rag_ready":      ready,
+        "document_count": len(docs),
+        "documents":      docs,
+        "knowledge_dir":  str(KNOWLEDGE_DIR),
+        "note": "Upload documents via POST /upload-docs to enable RAG."
+                if not docs else
+                "RAG index built. Next /analyze call will use these documents."
+                if ready else
+                "Documents found but index not built yet — try POST /upload-docs again.",
+    }
+
+
+@app.post("/upload-docs")
+async def upload_docs(files: List[UploadFile] = File(...)):
+    """
+    Upload knowledge documents (PDF, DOCX, TXT, MD) to the knowledge/ folder.
+    After saving, rebuilds the RAG index automatically.
+    All subsequent /analyze calls will use RAG with these documents.
+
+    curl example:
+        curl -X POST http://127.0.0.1:8000/upload-docs
+             -F "files=@policy.pdf"
+             -F "files=@guidelines.md"
+    """
+    allowed   = []
+    rejected  = []
+    saved     = []
+
+    for file in files:
+        ext = Path(file.filename).suffix.lower()
+        if ext not in ALLOWED_DOC_EXTENSIONS:
+            rejected.append({"file": file.filename, "reason": f"Extension '{ext}' not allowed. Use PDF, DOCX, TXT, or MD."})
+            continue
+        allowed.append(file)
+
+    # Save allowed files to knowledge/
+    for file in allowed:
+        try:
+            contents  = await file.read()
+            save_path = KNOWLEDGE_DIR / file.filename
+            with open(save_path, "wb") as f:
+                f.write(contents)
+            saved.append(file.filename)
+        except Exception as e:
+            rejected.append({"file": file.filename, "reason": str(e)})
+
+    # Rebuild RAG index if any files were saved
+    rag_rebuilt = False
+    rag_error   = None
+    if saved:
+        try:
+            from rag.pipeline import build_rag_pipeline
+            build_rag_pipeline()
+            rag_rebuilt = True
+        except Exception as e:
+            rag_error = f"{type(e).__name__}: {e}"
+
+    # List all docs now in knowledge/
+    all_docs = [
+        f.name for f in KNOWLEDGE_DIR.iterdir()
+        if f.is_file() and f.suffix in ALLOWED_DOC_EXTENSIONS
+    ]
+
+    return {
+        "saved":          saved,
+        "rejected":       rejected,
+        "rag_rebuilt":    rag_rebuilt,
+        "rag_error":      rag_error,
+        "all_documents":  all_docs,
+        "document_count": len(all_docs),
+        "status": "OK" if (saved and rag_rebuilt) else "PARTIAL" if saved else "FAIL",
+        "note": "RAG index is live. Next /analyze call will use these documents."
+                if rag_rebuilt else
+                "Files saved but RAG index rebuild failed — check rag_error for details.",
+    }
+
+
+@app.get("/download-report/{run_id}")
+def download_report(run_id: str):
+    """
+    Returns the markdown report file for a given run_id as a file download.
+    n8n HTTP Request node fetches this as binary → Email node attaches it.
+
+    n8n HTTP Request node config:
+        Method:          GET
+        URL:             http://127.0.0.1:8000/download-report/{{ $json.run_id }}
+        Response Format: File   ← critical: set this in Options tab
+    """
+    matches = list(REPORTS_DIR.glob(f"*_{run_id}.md"))
+    if not matches:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No markdown report found for run_id '{run_id}'. "
+                   f"Report may not have generated if insights failed."
+        )
+    report_file = matches[0]
+    return FileResponse(
+        path=str(report_file),
+        media_type="text/markdown",
+        filename=report_file.name,
+    )
 
 
 @app.post("/analyze")
