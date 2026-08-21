@@ -1,0 +1,172 @@
+{
+  "name": "AI Copilot V3 — Gmail Listener",
+  "nodes": [
+    {
+      "id": "e1f2a3b4-0001-0001-0001-000000000001",
+      "name": "Email Trigger (IMAP)",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "credentials": {
+        "imap": {
+          "id": "REPLACE_WITH_YOUR_IMAP_CREDENTIAL_ID",
+          "name": "IMAP Account"
+        }
+      },
+      "parameters": {
+        "mailbox": "INBOX",
+        "action": "read",
+        "downloadAttachments": true,
+        "format": "simple",
+        "options": {}
+      },
+      "notes": "Polls Gmail inbox every minute. Downloads all attachments as binary. SETUP: replace credential ID with your IMAP credential after creating it in n8n Settings > Credentials."
+    },
+    {
+      "id": "e1f2a3b4-0002-0002-0002-000000000002",
+      "name": "Check Has CSV",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-1",
+              "leftValue": "={{ $json.attachments ? $json.attachments.length : 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "notes": "Only processes emails that have attachments. Emails without attachments go to the false branch (ignored). True branch = has attachments → continue to pipeline."
+    },
+    {
+      "id": "e1f2a3b4-0003-0003-0003-000000000003",
+      "name": "Analyze CSV",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 220],
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8000/analyze",
+        "authentication": "none",
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "value": "",
+              "parameterType": "formBinaryData",
+              "inputDataFieldName": "attachment_0"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "Sends the CSV attachment to FastAPI /analyze endpoint as multipart form data. The binary property 'attachment_0' is the first email attachment. If the attachment binary has a different name (check IMAP trigger output), update 'inputDataFieldName' accordingly."
+    },
+    {
+      "id": "e1f2a3b4-0004-0004-0004-000000000004",
+      "name": "Download Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 220],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://127.0.0.1:8000/download-report/{{ $json.run_id }}",
+        "authentication": "none",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "notes": "Downloads the generated .md report as a binary file. run_id comes from the Analyze CSV response. Response Format must be 'File' — check Options > Response > Response Format."
+    },
+    {
+      "id": "e1f2a3b4-0005-0005-0005-000000000005",
+      "name": "Reply With Report",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1120, 220],
+      "parameters": {
+        "fromEmail": "mu181842@gmail.com",
+        "toEmail": "={{ $('Email Trigger (IMAP)').item.json.from }}",
+        "subject": "=Re: {{ $('Email Trigger (IMAP)').item.json.subject }} — Analysis Complete",
+        "emailType": "text",
+        "message": "=Hi,\n\nYour dataset has been analyzed automatically by AI Data Operations Copilot V3.\n\nDataset: {{ $('Analyze CSV').item.json.filename }}\nStatus: {{ $('Analyze CSV').item.json.overall_status }}\nRows: {{ $('Analyze CSV').item.json.rows }} | Columns: {{ $('Analyze CSV').item.json.columns }}\nDuration: {{ $('Analyze CSV').item.json.duration_seconds }}s\nRAG Used: {{ $('Analyze CSV').item.json.rag_used }}\n\nFull analysis report is attached as a .md file.\n\n---\nSent automatically by AI Data Operations Copilot V3",
+        "options": {
+          "attachments": "data"
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "REPLACE_WITH_YOUR_SMTP_CREDENTIAL_ID",
+          "name": "SMTP Account"
+        }
+      },
+      "notes": "Replies to the original sender with the .md report attached. toEmail pulls the sender address from the IMAP trigger. SETUP: replace credential ID with your SMTP credential."
+    }
+  ],
+  "connections": {
+    "Email Trigger (IMAP)": {
+      "main": [
+        [{"node": "Check Has CSV", "type": "main", "index": 0}]
+      ]
+    },
+    "Check Has CSV": {
+      "main": [
+        [{"node": "Analyze CSV", "type": "main", "index": 0}],
+        []
+      ]
+    },
+    "Analyze CSV": {
+      "main": [
+        [{"node": "Download Report", "type": "main", "index": 0}]
+      ]
+    },
+    "Download Report": {
+      "main": [
+        [{"node": "Reply With Report", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "e1f2a3b4-ffff-ffff-ffff-000000000005",
+  "_notes": {
+    "purpose": "Gmail listener — email arrives with CSV → pipeline runs → report emailed back to sender",
+    "how_to_test": [
+      "1. Enable IMAP in Gmail settings (Settings > Forwarding and POP/IMAP > Enable IMAP)",
+      "2. Create IMAP credential in n8n (imap.gmail.com, port 993, SSL on, App Password)",
+      "3. Import this workflow into n8n",
+      "4. Replace REPLACE_WITH_YOUR_IMAP_CREDENTIAL_ID with your actual IMAP credential ID",
+      "5. Replace REPLACE_WITH_YOUR_SMTP_CREDENTIAL_ID with your actual SMTP credential ID",
+      "6. Make sure uvicorn is running: uvicorn automation.scripts.api:app --reload --port 8000",
+      "7. Click 'Test Workflow' in n8n — it will wait for an email",
+      "8. Send an email to mu181842@gmail.com with a CSV file attached",
+      "9. Within 1 minute, n8n should pick it up and email the report back to you"
+    ],
+    "troubleshooting": {
+      "attachment_binary_name": "If Analyze CSV fails, click the IMAP trigger output and check what binary property names appear. Update inputDataFieldName in Analyze CSV node to match.",
+      "imap_connection": "If IMAP credential fails, make sure IMAP is enabled in Gmail AND you're using App Password not your real password.",
+      "pipeline_fails": "Check uvicorn terminal for errors. The /analyze endpoint logs each run."
+    }
+  }
+}
