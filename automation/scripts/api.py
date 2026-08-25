@@ -360,7 +360,145 @@ async def upload_docs(files: List[UploadFile] = File(...)):
     }
 
 
-@app.get("/download-report/{run_id}")
+@app.post("/analyze-email")
+async def analyze_email(files: List[UploadFile] = File(...)):
+    """
+    Single endpoint for the Gmail listener workflow.
+    Send ALL email attachments here — it sorts them automatically:
+
+    - .csv files       → analyzed by V2 pipeline
+    - .pdf/.docx/.txt/.md → uploaded to knowledge/, RAG index rebuilt
+
+    This means if a user emails both a CSV and a company policy PDF,
+    the analysis will use the PDF as RAG context automatically.
+
+    n8n HTTP Request node config:
+        Method: POST
+        URL: http://127.0.0.1:8000/analyze-email
+        Body: Form-Data Multipart
+        Add one parameter per attachment:
+            Name: files | Input Field: attachment_0
+            Name: files | Input Field: attachment_1  (if second attachment exists)
+    """
+    csv_files = []
+    doc_files = []
+
+    # Sort attachments by type
+    for f in files:
+        ext = Path(f.filename).suffix.lower()
+        if ext == ".csv":
+            csv_files.append(f)
+        elif ext in ALLOWED_DOC_EXTENSIONS:
+            doc_files.append(f)
+
+    if not csv_files:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No CSV file found in attachments. "
+                   f"Received: {[f.filename for f in files]}. "
+                   f"Please attach at least one .csv file."
+        )
+
+    # ── Upload documents and rebuild RAG index ────────────────────────────────
+    docs_saved = []
+    rag_rebuilt = False
+    if doc_files:
+        for doc in doc_files:
+            try:
+                contents = await doc.read()
+                save_path = KNOWLEDGE_DIR / doc.filename
+                with open(save_path, "wb") as f_out:
+                    f_out.write(contents)
+                docs_saved.append(doc.filename)
+            except Exception as e:
+                pass  # log but don't stop
+
+        if docs_saved:
+            try:
+                from rag.pipeline import build_rag_pipeline
+                build_rag_pipeline()
+                rag_rebuilt = True
+            except Exception:
+                pass  # RAG failure doesn't stop CSV analysis
+
+    # ── Read and analyze the CSV ──────────────────────────────────────────────
+    csv_file = csv_files[0]  # use first CSV found
+    try:
+        contents = await csv_file.read()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+            tmp.write(contents)
+            tmp_path = tmp.name
+        df = pd.read_csv(tmp_path)
+        os.unlink(tmp_path)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Could not read CSV: {e}")
+
+    # RAG is now auto-detected in run_v2_pipeline via _rag_ready()
+    # If docs were uploaded above, index is rebuilt and RAG will be used
+    try:
+        report = run_v2_pipeline(df, csv_file.filename)
+    except Exception:
+        report = {
+            "run_id":         str(uuid.uuid4())[:8],
+            "timestamp":      datetime.utcnow().isoformat() + "Z",
+            "filename":       csv_file.filename,
+            "overall_status": "ERROR",
+            "error":          traceback.format_exc(),
+        }
+
+    report["docs_uploaded"]  = docs_saved
+    report["rag_rebuilt"]    = rag_rebuilt
+    report = _save_and_log(report, csv_file.filename)
+    return JSONResponse(content=report)
+
+
+class FailureLog(BaseModel):
+    workflow:         str
+    failed_node:      str
+    error:            str
+    status_code:      int   = 0
+    retry_count:      int   = 0
+    csv_file:         str   = "unknown"
+    duration_seconds: float = 0.0
+
+
+@app.post("/log-failure")
+def log_failure(body: FailureLog):
+    """
+    Called by n8n's failure branch when pipeline fails after all retries.
+    Writes to automation/logs/failures.log — separate from api_runs.log.
+
+    n8n HTTP Request node config:
+        Method: POST
+        URL:    http://127.0.0.1:8000/log-failure
+        Body:   JSON
+        {
+          "workflow":    "AI Copilot Sub-workflow",
+          "failed_node": "Analyze CSV",
+          "error":       "{{ $json.error }}",
+          "status_code": {{ $json.statusCode }},
+          "retry_count": 3,
+          "csv_file":    "{{ $('When Executed by Another Workflow').item.json.csv_file }}"
+        }
+    """
+    entry = {
+        "timestamp":        datetime.utcnow().isoformat() + "Z",
+        "workflow":         body.workflow,
+        "failed_node":      body.failed_node,
+        "error":            body.error,
+        "status_code":      body.status_code,
+        "retry_count":      body.retry_count,
+        "csv_file":         body.csv_file,
+        "duration_seconds": body.duration_seconds,
+        "status":           "FAILED",
+    }
+    failure_log = LOGS_DIR / "failures.log"
+    with open(failure_log, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+    return {"logged": True, "entry": entry}
+
+
 def download_report(run_id: str):
     """
     Returns the markdown report file for a given run_id as a file download.
